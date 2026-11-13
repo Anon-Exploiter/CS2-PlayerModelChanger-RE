@@ -6,6 +6,7 @@ using CounterStrikeSharp.API.Modules.Utils;
 using System.Collections.Concurrent;
 using System.Drawing;
 using CounterStrikeSharp.API.Modules.Config;
+using CounterStrikeSharp.API.Modules.Timers;
 using Microsoft.Extensions.Logging;
 using CounterStrikeSharp.API.Modules.Memory;
 using System.Runtime.InteropServices;
@@ -563,19 +564,13 @@ public partial class PlayerModelChanger : BasePlugin, IPluginConfig<ModelConfig>
                 Server.NextFrame(() =>
                 {
                     Service.RollPickedModels(player);
-                    var model = Service.GetPlayerModel(player, Side.All);
-                    if (model != null)
-                    {
-                        SetModelNextServerFrame(player, model, model.Disableleg);
-                    }
-                    else
-                    {
-                        var originalRender = player.PlayerPawn.Value.Render;
-                        player.PlayerPawn.Value.Render = Color.FromArgb(Config.DisableDefaultModelLeg ? 254 : 255, originalRender.R, originalRender.G, originalRender.B);
-                        Utilities.SetStateChanged(player.PlayerPawn.Value, "CBaseModelEntity", "m_clrRender");
-                    }
+                    ApplyHumanModel(player);
                 });
             });
+
+            // Other plugins (AstraSkins agents) set their own model on spawn and at freeze end; reapply after them.
+            AddTimer(0.5f, () => ApplyHumanModel(player), TimerFlags.STOP_ON_MAPCHANGE);
+            AddTimer(1.5f, () => ApplyHumanModel(player), TimerFlags.STOP_ON_MAPCHANGE);
         }
         catch (Exception ex)
         {
@@ -583,6 +578,46 @@ public partial class PlayerModelChanger : BasePlugin, IPluginConfig<ModelConfig>
         }
 
         return HookResult.Continue;
+    }
+
+    [GameEventHandler(HookMode.Post)]
+    public HookResult OnRoundFreezeEndEvent(EventRoundFreezeEnd @event, GameEventInfo info)
+    {
+        foreach (var player in Utilities.GetPlayers())
+        {
+            if (player.IsValid && !player.IsBot)
+            {
+                var target = player;
+                Server.NextFrame(() => ApplyHumanModel(target));
+            }
+        }
+        return HookResult.Continue;
+    }
+
+    private void ApplyHumanModel(CCSPlayerController player)
+    {
+        if (!Enable || !player.IsValid || player.IsBot || player.AuthorizedSteamID == null
+            || (player.Team != CsTeam.Terrorist && player.Team != CsTeam.CounterTerrorist))
+        {
+            return;
+        }
+        var pawn = player.PlayerPawn.Value;
+        if (pawn == null || !pawn.IsValid || pawn.LifeState != (byte)LifeState_t.LIFE_ALIVE)
+        {
+            return;
+        }
+
+        var model = Service.GetPlayerModel(player, Side.All);
+        if (model != null)
+        {
+            SetModelNextServerFrame(player, model, model.Disableleg);
+        }
+        else
+        {
+            var originalRender = pawn.Render;
+            pawn.Render = Color.FromArgb(Config.DisableDefaultModelLeg ? 254 : 255, originalRender.R, originalRender.G, originalRender.B);
+            Utilities.SetStateChanged(pawn, "CBaseModelEntity", "m_clrRender");
+        }
     }
 
     private static string BotKey(CCSPlayerController player)
