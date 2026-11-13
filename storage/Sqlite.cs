@@ -50,6 +50,10 @@ public class SqliteStorage : IStorage
                 `skin` INTEGER NOT NULL
             );
         ");
+        connection.Execute(@"
+            DELETE FROM `skippreferences` WHERE `id` NOT IN (SELECT MAX(`id`) FROM `skippreferences` GROUP BY `steamid`, `model`);
+            CREATE UNIQUE INDEX IF NOT EXISTS `idx_skippreferences` ON `skippreferences` (`steamid`, `model`);
+        ");
     }
 
     public async Task<SqliteConnection> ConnectAsync()
@@ -142,16 +146,16 @@ public class SqliteStorage : IStorage
     public List<int> GetMeshgroupPreference(ulong SteamID, string modelIndex)
     {
         using SqliteConnection connection = ConnectAsync().Result;
-        return connection.Query<int>("SELECT `meshgroup` FROM `meshgrouppreferences` WHERE `steamid`=@SteamID AND `model`=@modelName", new { SteamID, modelIndex }).ToList();
+        return connection.Query<int>("SELECT `meshgroup` FROM `meshgrouppreferences` WHERE `steamid`=@SteamID AND `model`=@modelIndex", new { SteamID, modelIndex }).ToList();
     }
 
     public void AddMeshgroupPreference(ulong SteamID, string modelIndex, int meshgroup)
     {
         using SqliteConnection connection = ConnectAsync().Result;
-        var existing = connection.QueryFirstOrDefault<int>($"SELECT COUNT(*) FROM `meshgrouppreferences` WHERE `steamid` = {SteamID} AND `model` = '{modelIndex}' AND `meshgroup` = {meshgroup};");
+        var existing = connection.QueryFirstOrDefault<int>("SELECT COUNT(*) FROM `meshgrouppreferences` WHERE `steamid` = @SteamID AND `model` = @modelIndex AND `meshgroup` = @meshgroup;", new { SteamID, modelIndex, meshgroup });
         if (existing == 0)
         {
-            connection.ExecuteAsync("INSERT INTO `meshgrouppreferences` (`steamid`, `model`, `meshgroup`) VALUES (@SteamID, @modelIndex, @meshgroup);", new { SteamID, modelIndex, meshgroup });
+            connection.Execute("INSERT INTO `meshgrouppreferences` (`steamid`, `model`, `meshgroup`) VALUES (@SteamID, @modelIndex, @meshgroup);", new { SteamID, modelIndex, meshgroup });
         }
     }
 
@@ -168,7 +172,7 @@ public class SqliteStorage : IStorage
 
     public void UpdateSkinPerference(ulong SteamID, string modelIndex, int skin)
     {
-        ExecuteAsync("INSERT INTO `skippreferences` (`steamid`, `model`, `skin`) VALUES (@SteamID, @modelIndex, @skin) ON DUPLICATE KEY UPDATE `skin` = @skin;", new { SteamID, modelIndex, skin });
+        ExecuteAsync("INSERT INTO `skippreferences` (`steamid`, `model`, `skin`) VALUES (@SteamID, @modelIndex, @skin) ON CONFLICT(`steamid`, `model`) DO UPDATE SET `skin` = @skin;", new { SteamID, modelIndex, skin });
     }
 
     public Tuple<List<ModelCache>, List<MeshgroupPreferenceCache>, List<SkinPreferenceCache>> GetCaches()
